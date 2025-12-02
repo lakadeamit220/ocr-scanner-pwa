@@ -40,4 +40,15 @@ export default defineConfig({
       }
     }),
   ],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+    hmr: {
+      host: 'localhost',
+    },
+    //allowedHosts: 'all', // ← Cleanest option (Vite ≥5.1)
+    // fallback for older Vite 5.0.x use the array version below instead:
+    allowedHosts: ['.ngrok-free.app', '.ngrok.io', '.ngrok.app', 'unmollifiable-karima-unpackaged.ngrok-free.dev'],
+  },
 })
