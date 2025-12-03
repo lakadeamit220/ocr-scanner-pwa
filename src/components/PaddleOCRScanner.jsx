@@ -1,60 +1,24 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 
 export default function PaddleOCRScanner() {
     const [image, setImage] = useState(null);
     const [text, setText] = useState("");
     const [loading, setLoading] = useState(false);
 
-    // Load ONNXRuntime Web from CDN (WASM backend)
+    // Load ONNXRuntime Web from CDN
     async function loadOrtFromCDN() {
-        // Already loaded? Return existing
-        if (window.ort) return window.ort;
-
-        const ortModule = await import(
+        // Import the ES module from CDN
+        const ort = await import(
             "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs"
         );
 
-        const ort = ortModule; // Correct import
-        // Configure WASM paths
-        ort.env.wasm.wasmPaths =
-            "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/wasm/";
-
-        console.log("ORT Loaded from CDN:", ort.version);
+        console.log("ORT loaded from CDN, version:", ort.version);
 
         return ort;
     }
 
-
-    // Load PaddleOCR model
-    async function runOCR(file) {
-        try {
-            setLoading(true);
-            const ort = await loadOrtFromCDN();
-
-            const session = await ort.InferenceSession.create(
-                "https://cdn.jsdelivr.net/npm/paddleocr-js@latest/models/ocr_rec.onnx",
-                {
-                    executionProviders: ["wasm"],
-                }
-            );
-
-            const img = await createImageBitmap(file);
-            const tensor = await imageToTensor(img);
-
-            const output = await session.run({ x: tensor });
-            const result = decodeOutput(output);
-
-            setText(result);
-        } catch (err) {
-            console.error("OCR error:", err);
-            setText("Error: " + err.message);
-        } finally {
-            setLoading(false);
-        }
-    }
-
     // Convert image → tensor
-    async function imageToTensor(img) {
+    async function imageToTensor(img, ort) {
         const canvas = document.createElement("canvas");
         canvas.width = img.width;
         canvas.height = img.height;
@@ -73,9 +37,43 @@ export default function PaddleOCRScanner() {
         return new ort.Tensor("float32", arr, [1, 3, img.height, img.width]);
     }
 
-    // Dummy decoder (replace with your logic)
+    // Dummy decoder (replace with your OCR decoding)
     function decodeOutput(output) {
         return "Recognized text ...";
+    }
+
+    // Run OCR on selected file
+    async function runOCR(file) {
+        setLoading(true);
+        setText("");
+
+        try {
+            const ort = await loadOrtFromCDN();
+
+            // Load ONNX model from CDN
+            const session = await ort.InferenceSession.create(
+                "https://cdn.jsdelivr.net/npm/paddleocr-js@latest/models/ocr_rec.onnx",
+                {
+                    executionProviders: ["wasm"], // use WASM backend
+                    // Specify CDN path for WASM files
+                    wasmPaths:
+                        "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/wasm/",
+                }
+            );
+
+            const img = await createImageBitmap(file);
+            const tensor = await imageToTensor(img, ort);
+
+            const output = await session.run({ x: tensor });
+            const result = decodeOutput(output);
+
+            setText(result);
+        } catch (err) {
+            console.error("OCR error:", err);
+            setText("Error: " + err.message);
+        } finally {
+            setLoading(false);
+        }
     }
 
     return (
@@ -87,6 +85,7 @@ export default function PaddleOCRScanner() {
                 accept="image/*"
                 onChange={(e) => {
                     const file = e.target.files[0];
+                    if (!file) return;
                     setImage(URL.createObjectURL(file));
                     runOCR(file);
                 }}
