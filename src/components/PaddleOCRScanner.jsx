@@ -7,15 +7,15 @@ export default function PaddleOCRScanner() {
 
     // Load ONNXRuntime Web from CDN (WASM backend)
     async function loadOrtFromCDN() {
+        // Already loaded? Return existing
         if (window.ort) return window.ort;
 
-        await import(
+        const ortModule = await import(
             "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs"
         );
 
-        const ort = window.ort;
-
-        // Configure WASM paths from CDN
+        const ort = ortModule; // Correct import
+        // Configure WASM paths
         ort.env.wasm.wasmPaths =
             "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/wasm/";
 
@@ -23,6 +23,7 @@ export default function PaddleOCRScanner() {
 
         return ort;
     }
+
 
     // Load PaddleOCR model
     async function runOCR(file) {
