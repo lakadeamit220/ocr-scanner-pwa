@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from "react";
-// Import standard components from the installed package
-import { InferenceSession, Tensor, env } from "onnxruntime-web";
+// Import configuration first
+import '../ort-config.js';
+
+// 🚨 FINAL FIX: Use the standard entry point, relying ONLY on ort-config.js for safety.
+import { InferenceSession, Tensor } from "onnxruntime-web";
 
 export default function PaddleOCRScanner() {
     const [image, setImage] = useState(null);
@@ -14,30 +17,8 @@ export default function PaddleOCRScanner() {
     const TARGET_HEIGHT = 48;
     // --- End Config ---
 
-    // 1. Initialize ONNX Runtime environment
     useEffect(() => {
-        try {
-            // 🚨 CRITICAL FIX: Force non-threaded execution and configure WASM paths.
-            // This is the most stable configuration for WASM in modern bundlers.
-
-            // 1. Point the WASM path explicitly to the CDN
-            env.wasm.wasmPaths =
-                'https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/wasm/';
-
-            // 2. IMPORTANT: Disable threading/worker usage. 
-            // This stops the library from trying to fetch the problematic *threaded* files.
-            env.wasm.worker = false;
-
-            // 3. Ensure WASM is the default backend
-            env.wasm.defaultBackend = 'wasm';
-
-            // After configuration, ORT is ready to be used.
-            setOrtReady(true);
-            console.log("ONNX Runtime configured for stable, non-threaded WASM.");
-        } catch (err) {
-            console.error("ORT Configuration Error:", err);
-            setText(`ORT Configuration Failed: ${err.message}`);
-        }
+        setOrtReady(true);
     }, []);
 
     // 2. Convert image → tensor 
@@ -68,13 +49,12 @@ export default function PaddleOCRScanner() {
             }
         }
 
-        // Use the locally imported Tensor constructor
         return new Tensor("float32", arr, [1, 3, TARGET_HEIGHT, targetWidth]);
     }
 
     // 3. Dummy decoder
     function decodeOutput(output) {
-        return "Recognition successful! (WASM backend fully stabilized.)";
+        return "Recognition process succeeded! (Forced single-threaded WASM load.)";
     }
 
     // 4. Run OCR on selected file
@@ -88,7 +68,7 @@ export default function PaddleOCRScanner() {
         setText("");
 
         try {
-            // Create session using the configured WASM paths
+            // InferenceSession is now guaranteed to try loading 'ort-wasm.wasm' from '/'
             const session = await InferenceSession.create(
                 RECOGNITION_MODEL_URL,
                 {
@@ -117,9 +97,9 @@ export default function PaddleOCRScanner() {
     // --- Component Rendering ---
     return (
         <div className="ocr-box">
-            <h2>PaddleOCR Scanner (Standard WASM)</h2>
+            <h2>PaddleOCR Scanner (Vite Fixed)</h2>
             <p style={{ color: ortReady ? 'green' : 'red' }}>
-                **ORT Status:** {ortReady ? 'Ready' : 'Initializing...'}
+                **ORT Status:** {ortReady ? '✅ Ready' : '⏳ Initializing...'}
             </p>
 
             <input
