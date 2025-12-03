@@ -24,7 +24,9 @@ export default defineConfig({
       }
     })
   ],
+  assetsInclude: ["**/*.wasm"],
   server: {
+    mimeTypes: { "application/wasm": ["wasm"] },
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
