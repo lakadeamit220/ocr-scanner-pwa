@@ -9,8 +9,8 @@ function App() {
     <>
       {/* <OCRScanner /> */}
       {/* <TesseractSnapshot /> */}
-      {/* <TesseractLive /> */}
-      <GoogleMLKitLive />
+      <TesseractLive />
+      {/* <GoogleMLKitLive /> */}
     </>
   )
 }
