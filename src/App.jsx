@@ -8,8 +8,8 @@ function App() {
   return (
     <>
       {/* <OCRScanner /> */}
-      {/* <TesseractSnapshot /> */}
-      <TesseractLive />
+      <TesseractSnapshot />
+      {/* <TesseractLive /> */}
       {/* <GoogleMLKitLive /> */}
     </>
   )
