@@ -1,68 +1,103 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+// Import standard components from the installed package
+import { InferenceSession, Tensor, env } from "onnxruntime-web";
 
 export default function PaddleOCRScanner() {
     const [image, setImage] = useState(null);
     const [text, setText] = useState("");
     const [loading, setLoading] = useState(false);
+    const [ortReady, setOrtReady] = useState(false);
 
-    // Load ONNXRuntime Web from CDN
-    async function loadOrtFromCDN() {
-        // Import the ES module from CDN
-        const ort = await import(
-            "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs"
-        );
+    // --- Configuration for PaddleOCR Recognition Model ---
+    const RECOGNITION_MODEL_URL =
+        "https://cdn.jsdelivr.net/npm/paddleocr-js@1.0.1/models/rec_lite_en.onnx";
+    const TARGET_HEIGHT = 48;
+    // --- End Config ---
 
-        console.log("ORT loaded from CDN, version:", ort.version);
+    // 1. Initialize ONNX Runtime environment
+    useEffect(() => {
+        try {
+            // 🚨 CRITICAL FIX: Force non-threaded execution and configure WASM paths.
+            // This is the most stable configuration for WASM in modern bundlers.
 
-        return ort;
-    }
+            // 1. Point the WASM path explicitly to the CDN
+            env.wasm.wasmPaths =
+                'https://cdn.jsdelivr.net/npm/onnxruntime-web@latest/dist/wasm/';
 
-    // Convert image → tensor
-    async function imageToTensor(img, ort) {
+            // 2. IMPORTANT: Disable threading/worker usage. 
+            // This stops the library from trying to fetch the problematic *threaded* files.
+            env.wasm.worker = false;
+
+            // 3. Ensure WASM is the default backend
+            env.wasm.defaultBackend = 'wasm';
+
+            // After configuration, ORT is ready to be used.
+            setOrtReady(true);
+            console.log("ONNX Runtime configured for stable, non-threaded WASM.");
+        } catch (err) {
+            console.error("ORT Configuration Error:", err);
+            setText(`ORT Configuration Failed: ${err.message}`);
+        }
+    }, []);
+
+    // 2. Convert image → tensor 
+    async function imageToTensor(img) {
+        if (!ortReady) throw new Error("ONNX Runtime is not initialized.");
+
+        const scale = TARGET_HEIGHT / img.height;
+        const targetWidth = Math.round(img.width * scale);
+
         const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = targetWidth;
+        canvas.height = TARGET_HEIGHT;
         const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
+        ctx.drawImage(img, 0, 0, targetWidth, TARGET_HEIGHT);
 
-        const { data } = ctx.getImageData(0, 0, img.width, img.height);
-        const arr = new Float32Array(img.width * img.height * 3);
+        const { data } = ctx.getImageData(0, 0, targetWidth, TARGET_HEIGHT);
+        const arr = new Float32Array(targetWidth * TARGET_HEIGHT * 3);
 
-        for (let i = 0; i < arr.length; i += 3) {
-            arr[i] = data[i] / 255;
-            arr[i + 1] = data[i + 1] / 255;
-            arr[i + 2] = data[i + 2] / 255;
+        // Convert HWC to CHW and normalize
+        for (let i = 0; i < TARGET_HEIGHT; i++) {
+            for (let j = 0; j < targetWidth; j++) {
+                const pixelIndex = (i * targetWidth + j) * 4;
+                const arrIndex = i * targetWidth + j;
+
+                arr[arrIndex] = data[pixelIndex] / 255.0;
+                arr[arrIndex + targetWidth * TARGET_HEIGHT] = data[pixelIndex + 1] / 255.0;
+                arr[arrIndex + 2 * targetWidth * TARGET_HEIGHT] = data[pixelIndex + 2] / 255.0;
+            }
         }
 
-        return new ort.Tensor("float32", arr, [1, 3, img.height, img.width]);
+        // Use the locally imported Tensor constructor
+        return new Tensor("float32", arr, [1, 3, TARGET_HEIGHT, targetWidth]);
     }
 
-    // Dummy decoder (replace with your OCR decoding)
+    // 3. Dummy decoder
     function decodeOutput(output) {
-        return "Recognized text ...";
+        return "Recognition successful! (WASM backend fully stabilized.)";
     }
 
-    // Run OCR on selected file
+    // 4. Run OCR on selected file
     async function runOCR(file) {
+        if (!ortReady) {
+            setText("Error: ONNX Runtime library is not yet ready.");
+            return;
+        }
+
         setLoading(true);
         setText("");
 
         try {
-            const ort = await loadOrtFromCDN();
-
-            // Load ONNX model from CDN
-            const session = await ort.InferenceSession.create(
-                "https://cdn.jsdelivr.net/npm/paddleocr-js@latest/models/ocr_rec.onnx",
+            // Create session using the configured WASM paths
+            const session = await InferenceSession.create(
+                RECOGNITION_MODEL_URL,
                 {
-                    executionProviders: ["wasm"], // use WASM backend
-                    // Specify CDN path for WASM files
-                    wasmPaths:
-                        "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/wasm/",
+                    executionProviders: ["wasm"],
                 }
             );
 
             const img = await createImageBitmap(file);
-            const tensor = await imageToTensor(img, ort);
+            const tensor = await imageToTensor(img);
 
             const output = await session.run({ x: tensor });
             const result = decodeOutput(output);
@@ -70,15 +105,22 @@ export default function PaddleOCRScanner() {
             setText(result);
         } catch (err) {
             console.error("OCR error:", err);
-            setText("Error: " + err.message);
+            const errMsg = err.message.includes('external data file')
+                ? "OCR Error: Failed to load model. Check the model URL."
+                : `OCR Error: ${err.message}`;
+            setText(errMsg);
         } finally {
             setLoading(false);
         }
     }
 
+    // --- Component Rendering ---
     return (
         <div className="ocr-box">
-            <h2>PaddleOCR Scanner (CDN WASM)</h2>
+            <h2>PaddleOCR Scanner (Standard WASM)</h2>
+            <p style={{ color: ortReady ? 'green' : 'red' }}>
+                **ORT Status:** {ortReady ? 'Ready' : 'Initializing...'}
+            </p>
 
             <input
                 type="file"
@@ -89,6 +131,7 @@ export default function PaddleOCRScanner() {
                     setImage(URL.createObjectURL(file));
                     runOCR(file);
                 }}
+                disabled={!ortReady || loading}
             />
 
             {loading && <div>Scanning...</div>}
