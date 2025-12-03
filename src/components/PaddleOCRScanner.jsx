@@ -1,139 +1,220 @@
-// src/components/PaddleOCRScanner.jsx
-import React, { useState, useRef } from 'react';
-import * as ort from 'onnxruntime-web';
+import React, { useState, useRef, useEffect } from "react";
+import * as ort from "onnxruntime-web";
 
 export default function PaddleOCRScanner() {
+    const [detSession, setDetSession] = useState(null);
+    const [recSession, setRecSession] = useState(null);
+    const [keys, setKeys] = useState([]);
     const [imageURL, setImageURL] = useState(null);
+    const [result, setResult] = useState("");
     const [loading, setLoading] = useState(false);
-    const [resultText, setResultText] = useState('');
-    const canvasRef = useRef();
+    const canvasRef = useRef(null);
 
-    const [models, setModels] = useState({ det: null, rec: null, keys: null });
-
-    // Load models & dictionary when component mounts
-    React.useEffect(() => {
+    // Load models on mount
+    useEffect(() => {
         async function load() {
-            try {
-                const det = await ort.InferenceSession.create('/models/det.onnx', { executionProviders: ['wasm'] });
-                const rec = await ort.InferenceSession.create('/models/rec.onnx', { executionProviders: ['wasm'] });
-                const keys = await fetch('/models/keys.json').then(r => r.json());
-                setModels({ det, rec, keys });
-            } catch (e) {
-                console.error('Failed to load OCR models:', e);
-            }
+            const det = await ort.InferenceSession.create("/models/det.onnx", {
+                executionProviders: ["wasm"],
+            });
+            const rec = await ort.InferenceSession.create("/models/rec.onnx", {
+                executionProviders: ["wasm"],
+            });
+
+            const dict = await fetch("/models/keys.json").then((r) => r.json());
+
+            setDetSession(det);
+            setRecSession(rec);
+            setKeys(dict);
+
+            console.log("OCR models loaded!");
         }
+
         load();
     }, []);
 
-    const handleFile = (e) => {
+    // Handle image upload
+    function onFileChange(e) {
         const file = e.target.files[0];
         if (!file) return;
         const url = URL.createObjectURL(file);
         setImageURL(url);
-        setResultText('');
-    };
+        setResult("");
+    }
 
-    const runOCR = async () => {
-        if (!imageURL || !models.det || !models.rec || !models.keys) return;
+    // Resize image → 960px max side (recommended PaddleOCR scaling)
+    function resizeImage(image) {
+        const max = 960;
+        let { width, height } = image;
+
+        if (Math.max(width, height) > max) {
+            const scale = max / Math.max(width, height);
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(image, 0, 0, width, height);
+
+        return canvas;
+    }
+
+    // Convert image → Float32 tensor (CHW)
+    function toTensorFromCanvas(canvas) {
+        const h = canvas.height;
+        const w = canvas.width;
+        const ctx = canvas.getContext("2d");
+        const { data } = ctx.getImageData(0, 0, w, h);
+
+        const input = new Float32Array(h * w * 3);
+        let j = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            input[j++] = data[i] / 255;
+            input[j++] = data[i + 1] / 255;
+            input[j++] = data[i + 2] / 255;
+        }
+
+        return new ort.Tensor("float32", input, [1, 3, h, w]);
+    }
+
+    // Decode model output text
+    function decode(indices) {
+        let out = "";
+        for (let id of indices) {
+            const c = keys[id];
+            if (c && c !== "PAD" && c !== "SOS" && c !== "EOS") {
+                out += c;
+            }
+        }
+        return out;
+    }
+
+    // Main OCR pipeline
+    async function scan() {
+        if (!detSession || !recSession || !keys.length || !imageURL) {
+            alert("Models not loaded yet!");
+            return;
+        }
+
         setLoading(true);
-        setResultText('');
 
         const img = new Image();
         img.src = imageURL;
-        await new Promise((r) => (img.onload = r));
+        await img.decode();
 
-        const canvas = canvasRef.current;
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
+        // Step 1: Resize
+        const resizedCanvas = resizeImage(img);
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const { data, width, height } = imageData;
+        // Step 2: Convert to tensor
+        const detTensor = toTensorFromCanvas(resizedCanvas);
 
-        // Preprocess to float32 tensor (normalize to [0,1]), shape may need adapting depending on model
-        const input = new Float32Array(width * height * 3);
-        for (let i = 0, j = 0; i < data.length; i += 4, j += 3) {
-            input[j] = data[i] / 255.0;
-            input[j + 1] = data[i + 1] / 255.0;
-            input[j + 2] = data[i + 2] / 255.0;
-        }
-        const tensor = new ort.Tensor('float32', input, [1, 3, height, width]);
+        // Step 3: Run detection
+        const detOut = await detSession.run({ input: detTensor });
 
-        // Run detection model
-        let detOut;
-        try {
-            detOut = await models.det.run({ image: tensor });
-        } catch (e) {
-            console.error('Detection error:', e);
+        const boxes = detOut.boxes ?? detOut.output ?? detOut[Object.keys(detOut)[0]];
+
+        if (!boxes || boxes.data.length === 0) {
+            setResult("No text detected");
             setLoading(false);
             return;
         }
 
-        const boxes = detOut['boxes']?.data; // you may need to inspect model output names
+        const ctx = resizedCanvas.getContext("2d");
+        let finalText = "";
 
-        if (!boxes || boxes.length === 0) {
-            setResultText('No text detected');
-            setLoading(false);
-            return;
-        }
+        // Loop over all detected text boxes (polygon format: 8 numbers)
+        for (let i = 0; i < boxes.data.length; i += 8) {
+            const poly = boxes.data.slice(i, i + 8);
 
-        let text = '';
-        for (let i = 0; i < boxes.length; i += 4) {
-            const x1 = boxes[i];
-            const y1 = boxes[i + 1];
-            const x2 = boxes[i + 2];
-            const y2 = boxes[i + 3];
-            const w = x2 - x1;
-            const h = y2 - y1;
+            // Compute bounding box
+            const xs = [poly[0], poly[2], poly[4], poly[6]];
+            const ys = [poly[1], poly[3], poly[5], poly[7]];
+
+            const x = Math.min(...xs);
+            const y = Math.min(...ys);
+            const w = Math.max(...xs) - x;
+            const h = Math.max(...ys) - y;
+
+            if (w < 5 || h < 5) continue;
 
             // Crop region
-            const crop = ctx.getImageData(x1, y1, w, h);
-            const cd = crop.data;
-            const recInput = new Float32Array(w * h * 3);
-            for (let k = 0, j = 0; k < cd.length; k += 4, j += 3) {
-                recInput[j] = cd[k] / 255.0;
-                recInput[j + 1] = cd[k + 1] / 255.0;
-                recInput[j + 2] = cd[k + 2] / 255.0;
-            }
-            const recTensor = new ort.Tensor('float32', recInput, [1, 3, h, w]);
+            const crop = ctx.getImageData(x, y, w, h);
 
-            let recOut;
-            try {
-                recOut = await models.rec.run({ image: recTensor });
-            } catch (e) {
-                console.error('Recognition error:', e);
-                continue;
-            }
+            // Create canvas for recognition preprocessing
+            const recCanvas = document.createElement("canvas");
+            recCanvas.height = 32;
+            recCanvas.width = Math.round((32 / h) * w); // keep aspect ratio
 
-            const indexes = recOut['save_infer_model/scale_0.tmp_1']?.data; // output name might differ
-            if (!indexes) continue;
+            recCanvas.getContext("2d").drawImage(
+                resizedCanvas,
+                x,
+                y,
+                w,
+                h,
+                0,
+                0,
+                recCanvas.width,
+                recCanvas.height
+            );
 
-            for (const idx of indexes) {
-                const ch = models.keys[idx];
-                if (ch && ch !== 'PAD' && ch !== 'SOS' && ch !== 'EOS') {
-                    text += ch;
+            // Convert to tensor
+            const recTensor = toTensorFromCanvas(recCanvas);
+
+            // Run recognition
+            const recOut = await recSession.run({ input: recTensor });
+
+            const probs = recOut[Object.keys(recOut)[0]].data;
+            const indices = [];
+            for (let j = 0; j < probs.length; j += keys.length) {
+                let maxIdx = 0;
+                let maxVal = -999;
+                for (let k = 0; k < keys.length; k++) {
+                    if (probs[j + k] > maxVal) {
+                        maxVal = probs[j + k];
+                        maxIdx = k;
+                    }
                 }
+                indices.push(maxIdx);
             }
-            text += ' ';
+
+            const text = decode(indices);
+            if (text.trim()) finalText += text + "\n";
         }
 
-        setResultText(text.trim() || 'No text found');
+        setResult(finalText || "No readable text found");
         setLoading(false);
-    };
+    }
 
     return (
-        <div className="p-4 flex flex-col gap-4 items-center">
-            <h2 className="text-xl font-bold">PaddleOCR Scanner</h2>
-            <input type="file" accept="image/*" onChange={handleFile} />
-            {imageURL && <img src={imageURL} alt="to scan" style={{ maxWidth: '100%', marginTop: 16 }} />}
-            <button onClick={runOCR} disabled={loading || !imageURL} style={{ marginTop: 12 }}>
-                {loading ? 'Scanning...' : 'Scan Text'}
+        <div className="p-4 max-w-xl mx-auto">
+            <h2 className="text-xl font-bold mb-3">PaddleOCR Scanner</h2>
+
+            <input type="file" accept="image/*" onChange={onFileChange} />
+
+            {imageURL && (
+                <img
+                    src={imageURL}
+                    alt="preview"
+                    className="mt-4 max-w-full rounded border"
+                />
+            )}
+
+            <button
+                onClick={scan}
+                disabled={loading || !imageURL}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded"
+            >
+                {loading ? "Scanning..." : "Scan Text"}
             </button>
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-            <div style={{ marginTop: 16, whiteSpace: 'pre-wrap' }}>
-                {resultText || 'Scanned text will appear here'}
-            </div>
+
+            <canvas ref={canvasRef} style={{ display: "none" }} />
+
+            <pre className="mt-4 p-2 bg-gray-100 rounded whitespace-pre-wrap">
+                {result || "Scanned text will appear here"}
+            </pre>
         </div>
     );
 }
