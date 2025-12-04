@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Settings, X } from 'lucide-react'
+import { Copy, Settings, X, AlertCircle } from 'lucide-react'
 
 export default function MeterScanner() {
     const videoRef = useRef(null)
@@ -10,24 +10,38 @@ export default function MeterScanner() {
     const [apiKey, setApiKey] = useState('')
     const [showSettings, setShowSettings] = useState(false)
     const [tempApiKey, setTempApiKey] = useState('')
+    const [error, setError] = useState('')
 
-    // Load API key from storage on mount
+    // Load API key from localStorage (safe alternative to window.storage)
     useEffect(() => {
-        const loadApiKey = async () => {
-            try {
-                const result = await window.storage.get('K81035834388957')
-                if (result && result.value) {
-                    setApiKey(result.value)
-                }
-            } catch (error) {
-                console.log('No API key stored yet')
-            }
+        const savedKey = localStorage.getItem('K88643498688957')
+        if (savedKey) {
+            setApiKey(savedKey)
+            setTempApiKey(savedKey)
+        } else {
+            setShowSettings(true) // Auto-show settings on first use
         }
-        loadApiKey()
     }, [])
+
+    // Save API key
+    const saveApiKey = () => {
+        if (!tempApiKey.trim()) {
+            alert('Please enter a valid API key')
+            return
+        }
+        localStorage.setItem('meter_ocr_apikey', tempApiKey.trim())
+        setApiKey(tempApiKey.trim())
+        setShowSettings(false)
+        alert('API Key saved successfully!')
+    }
 
     // Start camera
     useEffect(() => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setNumber('Camera not supported on this device')
+            return
+        }
+
         navigator.mediaDevices
             .getUserMedia({
                 video: {
@@ -40,64 +54,64 @@ export default function MeterScanner() {
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream
                     videoRef.current.onloadedmetadata = () => {
-                        videoRef.current.play()
+                        videoRef.current?.play()
                         setReady(true)
                     }
                 }
             })
-            .catch(() => setNumber('❌ Camera access denied'))
+            .catch(err => {
+                console.error('Camera error:', err)
+                setNumber('Camera access denied or not available')
+            })
     }, [])
 
-    const saveApiKey = async () => {
-        try {
-            await window.storage.set('K81035834388957', tempApiKey)
-            setApiKey(tempApiKey)
-            setShowSettings(false)
-            alert('✓ API Key saved!')
-        } catch (error) {
-            alert('Failed to save API key')
-        }
-    }
-
     const extractOnlyNumbers = (text) => {
-        // Fix common OCR mistakes and extract digits
-        let cleaned = text
-            .replace(/O/gi, '0')
-            .replace(/I/g, '1')
-            .replace(/l/g, '1')
-            .replace(/S/g, '5')
-            .replace(/B/g, '8')
+        if (!text) return ''
+        return text
+            .replace(/O|o/gi, '0')
+            .replace(/I|l|!/gi, '1')
+            .replace(/S|s/gi, '5')
+            .replace(/B/gi, '8')
+            .replace(/G/gi, '6')
+            .replace(/Z/gi, '2')
             .replace(/[^0-9]/g, '')
-
-        return cleaned
+            .trim()
     }
 
     const scan = async () => {
-        if (!ready || scanning) {
-            setNumber('⏳ Please wait...')
-            return
-        }
-
+        if (!ready || scanning) return
         if (!apiKey) {
-            setNumber('❌ API Key required\n\nTap the ⚙️ icon to add your free OCR.space API key')
+            setError('Please set your OCR.space API key first')
+            setShowSettings(true)
             return
         }
 
         setScanning(true)
-        setNumber('🔍 Scanning with OCR.space...')
+        setNumber('')
+        setError('')
+        setNumber('Scanning...')
 
         const canvas = canvasRef.current
         const video = videoRef.current
+        if (!canvas || !video) {
+            setNumber('Camera not ready')
+            setScanning(false)
+            return
+        }
+
         canvas.width = video.videoWidth || 1280
         canvas.height = video.videoHeight || 720
-
         const ctx = canvas.getContext('2d')
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-        // Convert canvas to blob
         canvas.toBlob(async (blob) => {
+            if (!blob) {
+                setNumber('Failed to capture image')
+                setScanning(false)
+                return
+            }
+
             try {
-                // Create form data for OCR.space API
                 const formData = new FormData()
                 formData.append('file', blob, 'meter.jpg')
                 formData.append('apikey', apiKey)
@@ -105,9 +119,8 @@ export default function MeterScanner() {
                 formData.append('isOverlayRequired', 'false')
                 formData.append('detectOrientation', 'true')
                 formData.append('scale', 'true')
-                formData.append('OCREngine', '2') // Engine 2 is better for numbers
+                formData.append('OCREngine', '2')
 
-                // Call OCR.space API
                 const response = await fetch('https://api.ocr.space/parse/image', {
                     method: 'POST',
                     body: formData
@@ -115,108 +128,100 @@ export default function MeterScanner() {
 
                 const result = await response.json()
 
-                console.log('OCR.space response:', result)
+                if (result?.ParsedResults?.[0]?.ParsedText) {
+                    const rawText = result.ParsedResults[0].ParsedText
+                    const digits = extractOnlyNumbers(rawText)
 
-                if (result.OCRExitCode === 1 || result.IsErroredOnProcessing === false) {
-                    const ocrText = result.ParsedResults[0].ParsedText
-                    console.log('Raw OCR text:', ocrText)
-
-                    const extracted = extractOnlyNumbers(ocrText)
-
-                    if (extracted && extracted.length >= 1) {
-                        setNumber(extracted)
+                    if (digits && digits.length >= 4) {
+                        setNumber(digits)
                     } else {
-                        setNumber('❌ No numbers detected\n\nTips:\n• Move closer (15-20cm)\n• Better lighting needed\n• Hold camera steady\n• Align numbers in guide box')
+                        setNumber('No clear number found\n\nTry:\n• Getting closer (15-25cm)\n• Better lighting\n• Steady hand\n• Red digits preferred')
                     }
                 } else {
-                    const errorMsg = result.ErrorMessage || result.ErrorDetails || 'Unknown error'
-                    if (errorMsg.includes('Invalid API key')) {
-                        setNumber('❌ Invalid API Key\n\nPlease check your API key in settings')
+                    const err = result.ErrorMessage?.[0] || 'OCR failed'
+                    if (err.includes('Invalid API key')) {
+                        setError('Invalid API Key - Please update in settings')
+                        localStorage.removeItem('K88643498688957')
+                        setApiKey('')
+                        setShowSettings(true)
                     } else {
-                        setNumber(`❌ OCR failed\n\n${errorMsg}`)
+                        setNumber(`OCR Error:\n${err}`)
                     }
                 }
             } catch (err) {
-                console.error('Scan error:', err)
-                setNumber('❌ Scan failed\n\nCheck your internet connection')
+                console.error(err)
+                setNumber('No internet connection')
+            } finally {
+                setScanning(false)
             }
-            setScanning(false)
-        }, 'image/jpeg', 0.95)
+        }, 'image/jpeg', 0.92)
     }
 
     const copyNumber = () => {
-        if (number && !number.startsWith('❌') && !number.startsWith('🔍') && !number.startsWith('⏳')) {
-            navigator.clipboard.writeText(number)
-            alert('✓ Copied: ' + number)
+        if (number && !number.includes('❌') && !number.includes('Scanning')) {
+            navigator.clipboard.writeText(number.replace(/\n/g, ' '))
+            alert('Copied: ' + number)
         }
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white flex flex-col">
+        <div className="min-h-screen bg-black text-white flex flex-col">
             {/* Header */}
-            <header className="p-6 text-center border-b border-gray-700 relative">
-                <h1 className="text-3xl font-bold">Meter Number Scanner</h1>
-                <p className="text-green-400 text-sm mt-2">Powered by OCR.space API</p>
+            <header className="p-5 text-center relative border-b border-gray-800">
+                <h1 className="text-2xl font-bold">Meter Scanner</h1>
+                <p className="text-green-400 text-xs mt-1">Free OCR.space Powered</p>
                 <button
                     onClick={() => {
                         setShowSettings(true)
                         setTempApiKey(apiKey)
                     }}
-                    className="absolute right-6 top-6 p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+                    className="absolute right-4 top-5 p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
                 >
-                    <Settings size={24} />
+                    <Settings size={22} />
                 </button>
             </header>
 
-            {/* API Key Status */}
+            {/* Warning if no API key */}
             {!apiKey && (
-                <div className="mx-6 mt-4 p-4 bg-yellow-900/30 border-2 border-yellow-600 rounded-xl">
-                    <p className="text-yellow-200 text-sm text-center">
-                        ⚠️ <strong>Setup Required:</strong> Tap ⚙️ to add your free API key
-                    </p>
+                <div className="mx-4 mt-3 p-3 bg-orange-900/50 border border-orange-600 rounded-lg flex items-center gap-2">
+                    <AlertCircle size={18} />
+                    <p className="text-sm">Tap ⚙️ to add your free OCR.space API key</p>
                 </div>
             )}
 
             {/* Settings Modal */}
             {showSettings && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-6">
-                    <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-md border-2 border-gray-700">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-bold">API Settings</h2>
-                            <button onClick={() => setShowSettings(false)} className="p-1">
+                <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+                    <div className="bg-gray-900 rounded-2xl p-6 w-full max-w-md border border-gray-700">
+                        <div className="flex justify-between items-center mb-5">
+                            <h2 className="text-xl font-bold">OCR.space API Key</h2>
+                            <button onClick={() => setShowSettings(false)}>
                                 <X size={24} />
                             </button>
                         </div>
 
-                        <div className="mb-4">
-                            <label className="block text-sm text-gray-400 mb-2">
-                                OCR.space API Key
-                            </label>
-                            <input
-                                type="text"
-                                value={tempApiKey}
-                                onChange={(e) => setTempApiKey(e.target.value)}
-                                placeholder="Enter your API key"
-                                className="w-full bg-black border-2 border-gray-700 rounded-lg p-3 text-white focus:border-green-500 outline-none"
-                            />
-                        </div>
+                        <input
+                            type="password"
+                            value={tempApiKey}
+                            onChange={(e) => setTempApiKey(e.target.value)}
+                            placeholder="Paste your API key here"
+                            className="w-full bg-black border border-gray-600 rounded-lg px-4 py-3 mb-4 focus:border-green-500 outline-none"
+                        />
 
-                        <div className="bg-blue-900/30 border-2 border-blue-700 rounded-lg p-4 mb-4">
-                            <p className="text-blue-200 text-sm mb-2">
-                                <strong>📝 How to get FREE API key:</strong>
-                            </p>
-                            <ol className="text-xs text-blue-200 space-y-1 ml-4 list-decimal">
-                                <li>Visit: <span className="text-blue-400 font-mono">ocr.space/ocrapi</span></li>
-                                <li>Register with email (free)</li>
-                                <li>Get API key instantly</li>
-                                <li>25,000 free requests/month</li>
+                        <div className="bg-blue-900/30 border border-blue-700 rounded-lg p-4 mb-4 text-sm">
+                            <p className="font-bold text-blue-300 mb-2">Get Free API Key:</p>
+                            <ol className="text-blue-200 space-y-1 text-xs">
+                                <li>1. Go to <a href="https://ocr.space/ocrapi" target="_blank" className="underline">ocr.space/ocrapi</a></li>
+                                <li>2. Register (free)</li>
+                                <li>3. Copy your API key</li>
+                                <li>4. Paste here → Save</li>
                             </ol>
+                            <p className="mt-2 text-green-400 text-xs">25,000 free scans/month!</p>
                         </div>
 
                         <button
                             onClick={saveApiKey}
-                            disabled={!tempApiKey}
-                            className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:opacity-50 py-3 rounded-lg font-bold"
+                            className="w-full bg-green-600 hover:bg-green-500 py-4 rounded-lg font-bold text-lg"
                         >
                             Save API Key
                         </button>
@@ -224,81 +229,66 @@ export default function MeterScanner() {
                 </div>
             )}
 
-            {/* Camera View */}
-            <div className="relative flex-1">
+            {/* Camera + Overlay */}
+            <div className="relative flex-1 bg-black">
                 <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
 
-                {/* Guide box for numbers */}
+                {/* Alignment Guide */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="border-4 border-green-500 border-dashed rounded-2xl w-10/12 max-w-md h-32">
-                        <div className="absolute inset-0 flex items-center justify-center text-xs font-bold opacity-70">
-                            ALIGN NUMBERS HERE
-                        </div>
+                    <div className="border-4 border-green-500 border-dashed rounded-3xl w-11/12 max-w-lg h-32 opacity-80">
+                        <p className="text-green-400 text-sm font-bold mt-2 text-center">ALIGN DIGITS HERE</p>
                     </div>
                 </div>
 
                 {/* Scan Button */}
                 <button
                     onClick={scan}
-                    disabled={!ready || scanning || !apiKey}
-                    className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-green-500 text-black font-bold text-xl rounded-full w-24 h-24 shadow-2xl active:scale-95 disabled:opacity-50 disabled:bg-gray-600 transition-all flex items-center justify-center"
+                    disabled={scanning || !ready}
+                    className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-green-500 hover:bg-green-400 disabled:bg-gray-600 text-black font-bold text-2xl rounded-full w-28 h-28 shadow-2xl active:scale-95 transition-all flex items-center justify-center"
                 >
-                    {scanning ? '...' : 'SCAN'}
+                    {scanning ? '•••' : 'SCAN'}
                 </button>
 
                 <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            {/* Results Section */}
-            <div className="p-6 bg-gray-900">
-                {number && !scanning && !number.startsWith('⏳') && (
-                    <>
-                        {!number.startsWith('❌') && !number.startsWith('🔍') && (
+            {/* Result */}
+            <div className="p-5 bg-gray-900 border-t border-gray-800">
+                {number && !scanning && (
+                    <div className={number.includes('No ') || number.includes('Error') || number.includes('❌')
+                        ? "bg-red-900/40 border-2 border-red-600 rounded-2xl p-5"
+                        : "bg-gradient-to-r from-green-900 to-emerald-900 border-2 border-green-500 rounded-2xl p-6"
+                    }>
+                        {(!number.includes('No ') && !number.includes('Error') && !number.includes('❌')) ? (
                             <>
-                                <div className="bg-black p-6 rounded-2xl mb-4 border-2 border-green-600">
-                                    <p className="text-gray-400 text-sm mb-2 font-medium">
-                                        Scanned Number
-                                    </p>
-                                    <p className="text-5xl font-mono font-bold text-green-400 tracking-wider text-center">
-                                        {number}
-                                    </p>
-                                </div>
+                                <p className="text-green-300 text-sm font-medium mb-3 text-center">Detected Number</p>
+                                <p className="text-6xl font-bold font-mono text-center text-white tracking-wider">
+                                    {number}
+                                </p>
                                 <button
                                     onClick={copyNumber}
-                                    className="w-full bg-green-600 hover:bg-green-700 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 mb-3"
+                                    className="mt-6 w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-200"
                                 >
-                                    <Copy size={20} />
-                                    Copy Number
-                                </button>
-                                <button
-                                    onClick={() => setNumber('')}
-                                    className="w-full bg-gray-700 hover:bg-gray-600 py-3 rounded-xl font-semibold text-sm"
-                                >
-                                    Scan Again
+                                    <Copy size={22} /> Copy Number
                                 </button>
                             </>
+                        ) : (
+                            <pre className="text-sm text-red-200 whitespace-pre-wrap">{number}</pre>
                         )}
-                        {(number.startsWith('❌') || number.startsWith('🔍')) && (
-                            <div className="bg-red-900/30 border-2 border-red-600 p-5 rounded-xl">
-                                <pre className="text-sm whitespace-pre-wrap text-red-200">
-                                    {number}
-                                </pre>
-                            </div>
-                        )}
-                    </>
+                    </div>
                 )}
+
                 {scanning && (
-                    <div className="text-center">
-                        <p className="text-yellow-400 text-lg font-medium mb-2">Processing with OCR.space...</p>
-                        <p className="text-gray-400 text-sm">Hold steady for best results</p>
+                    <div className="text-center py-8">
+                        <p className="text-yellow-400 text-lg animate-pulse">Reading meter...</p>
+                        <p className="text-gray-400 text-sm mt-2">Hold steady • Good lighting helps</p>
                     </div>
                 )}
-                {!number && !scanning && (
-                    <div className="text-center text-gray-400">
-                        <p className="text-sm">
-                            {apiKey ? 'Align numbers in guide box and tap SCAN' : 'Setup API key first (tap ⚙️)'}
-                        </p>
-                    </div>
+
+                {!number && !scanning && apiKey && (
+                    <p className="text-center text-gray-400 text-sm">
+                        Point camera at meter digits and tap SCAN
+                    </p>
                 )}
             </div>
         </div>

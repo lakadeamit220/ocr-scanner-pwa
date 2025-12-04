@@ -13,8 +13,8 @@ function App() {
       {/* <TesseractSnapshot /> */}
       {/* <TesseractLive /> */}
       {/* <GoogleMLKitLive /> */}
-      <Scanner />
-      {/* <MeterScanner/> */}
+      {/* <Scanner /> */}
+      <MeterScanner/>
     </>
   )
 }
