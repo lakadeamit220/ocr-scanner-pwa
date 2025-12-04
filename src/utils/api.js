@@ -1,4 +1,4 @@
-export async function extractTextFromImage(imageFile, apiKey) {
+export async function extractTextFromImage(imageFile) {
     const formData = new FormData();
 
     formData.append('api_key', apiKey);

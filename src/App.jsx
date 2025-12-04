@@ -4,16 +4,21 @@ import OCRScanner from "./components/OCRScanner"
 import Scanner from "./components/Scanner"
 import TesseractLive from "./components/TesseractLive"
 import TesseractSnapshot from "./components/TesseractSnapshot"
+import KoloAPI from "./components/KoloAPI"
 
 function App() {
 
   return (
     <>
+
+      {/* <KoloAPI /> */}
+
       {/* <OCRScanner /> */}
       {/* <TesseractSnapshot /> */}
       {/* <TesseractLive /> */}
       {/* <GoogleMLKitLive /> */}
       {/* <Scanner /> */}
+
       <MeterScanner/>
     </>
   )
