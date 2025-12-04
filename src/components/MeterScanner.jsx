@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, ZapOff, Droplet } from 'lucide-react'
+import { Copy } from 'lucide-react'
 
 export default function MeterScanner() {
     const videoRef = useRef(null)
@@ -8,7 +8,6 @@ export default function MeterScanner() {
     const [scanning, setScanning] = useState(false)
     const [ready, setReady] = useState(false)
     const [tesseractReady, setTesseractReady] = useState(false)
-    const [meterType, setMeterType] = useState('electric') // 'electric' or 'water'
 
     // Load Tesseract from CDN
     useEffect(() => {
@@ -44,15 +43,14 @@ export default function MeterScanner() {
     }, [])
 
     const extractOnlyNumbers = (text) => {
-        // Remove all non-digits and common OCR mistakes
+        // First fix common OCR mistakes, then extract digits
         let cleaned = text
-            .replace(/[^0-9]/g, '') // Keep only digits
-            .replace(/O/g, '0')     // O → 0
-            .replace(/o/g, '0')     // o → 0
-            .replace(/I/g, '1')     // I → 1
-            .replace(/l/g, '1')     // l → 1
-            .replace(/S/g, '5')     // S → 5
-            .replace(/B/g, '8')     // B → 8
+            .replace(/O/gi, '0')     // O/o → 0
+            .replace(/I/g, '1')      // I → 1
+            .replace(/l/g, '1')      // l → 1
+            .replace(/S/g, '5')      // S → 5
+            .replace(/B/g, '8')      // B → 8
+            .replace(/[^0-9]/g, '')  // Keep only digits
 
         return cleaned
     }
@@ -78,11 +76,11 @@ export default function MeterScanner() {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const data = imageData.data
 
-        // Convert to grayscale with high contrast
+        // Convert to grayscale with adaptive contrast
         for (let i = 0; i < data.length; i += 4) {
             const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-            // Aggressive thresholding for clear digits
-            const value = gray > 140 ? 255 : 0
+            // Use threshold for better digit recognition
+            const value = gray > 128 ? 255 : 0
             data[i] = data[i + 1] = data[i + 2] = value
         }
         ctx.putImageData(imageData, 0, 0)
@@ -96,8 +94,8 @@ export default function MeterScanner() {
 
                 // OPTIMIZED FOR DIGITS ONLY
                 await worker.setParameters({
-                    tessedit_char_whitelist: '0123456789',  // ONLY numbers
-                    tessedit_pageseg_mode: '7',  // Single line of text (typical for meters)
+                    tessedit_char_whitelist: '0123456789',
+                    tessedit_pageseg_mode: '6',  // Uniform block of text
                     preserve_interword_spaces: '0',
                 })
 
@@ -106,10 +104,10 @@ export default function MeterScanner() {
 
                 const extracted = extractOnlyNumbers(text)
 
-                if (extracted && extracted.length >= 3) {
+                if (extracted && extracted.length >= 1) {
                     setNumber(extracted)
                 } else {
-                    setNumber('❌ No meter number found\n\nTips:\n• Get closer to the display\n• Ensure good lighting\n• Hold steady\n• Align with guide box')
+                    setNumber('❌ No numbers detected\n\nTips:\n• Move closer to display\n• Better lighting needed\n• Hold camera steady\n• Align numbers in guide box')
                 }
             } catch (err) {
                 console.error(err)
@@ -130,44 +128,19 @@ export default function MeterScanner() {
         <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white flex flex-col">
             {/* Header */}
             <header className="p-6 text-center border-b border-gray-700">
-                <h1 className="text-3xl font-bold">Meter Reader</h1>
-                <p className="text-blue-400 text-sm mt-2">Numbers Only • High Precision</p>
+                <h1 className="text-3xl font-bold">Number Scanner</h1>
+                <p className="text-green-400 text-sm mt-2">Extract Numbers from Meters</p>
             </header>
 
-            {/* Meter Type Selector */}
-            <div className="px-6 pt-4 flex gap-3">
-                <button
-                    onClick={() => setMeterType('electric')}
-                    className={`flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${meterType === 'electric'
-                            ? 'bg-yellow-500 text-black'
-                            : 'bg-gray-800 text-gray-400'
-                        }`}
-                >
-                    <ZapOff size={20} />
-                    Electric
-                </button>
-                <button
-                    onClick={() => setMeterType('water')}
-                    className={`flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${meterType === 'water'
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-800 text-gray-400'
-                        }`}
-                >
-                    <Droplet size={20} />
-                    Water
-                </button>
-            </div>
-
             {/* Camera View */}
-            <div className="relative flex-1 mt-4">
-                <video ref={videoRef} playsInline muted className="w-full h-full object-cover rounded-t-3xl" />
+            <div className="relative flex-1">
+                <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
 
-                {/* Guide box for meter display */}
+                {/* Guide box for numbers */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className={`border-4 border-dashed rounded-2xl w-10/12 max-w-md h-32 ${meterType === 'electric' ? 'border-yellow-400' : 'border-blue-400'
-                        }`}>
+                    <div className="border-4 border-green-500 border-dashed rounded-2xl w-10/12 max-w-md h-32">
                         <div className="absolute inset-0 flex items-center justify-center text-xs font-bold opacity-70">
-                            ALIGN METER DISPLAY HERE
+                            ALIGN NUMBERS HERE
                         </div>
                     </div>
                 </div>
@@ -176,10 +149,7 @@ export default function MeterScanner() {
                 <button
                     onClick={scan}
                     disabled={!ready || scanning || !tesseractReady}
-                    className={`absolute bottom-8 left-1/2 -translate-x-1/2 font-bold text-xl rounded-full w-24 h-24 shadow-2xl active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center ${meterType === 'electric'
-                            ? 'bg-yellow-400 text-black'
-                            : 'bg-blue-500 text-white'
-                        }`}
+                    className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-green-500 text-black font-bold text-xl rounded-full w-24 h-24 shadow-2xl active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center"
                 >
                     {scanning ? '...' : 'SCAN'}
                 </button>
@@ -188,14 +158,14 @@ export default function MeterScanner() {
             </div>
 
             {/* Results Section */}
-            <div className="p-6 bg-gray-900 rounded-b-3xl">
+            <div className="p-6 bg-gray-900">
                 {number && !scanning && !number.startsWith('⏳') && (
                     <>
                         {!number.startsWith('❌') && !number.startsWith('🔍') && (
                             <>
                                 <div className="bg-black p-6 rounded-2xl mb-4 border-2 border-green-600">
                                     <p className="text-gray-400 text-sm mb-2 font-medium">
-                                        {meterType === 'electric' ? 'Electric' : 'Water'} Meter Reading
+                                        Scanned Number
                                     </p>
                                     <p className="text-5xl font-mono font-bold text-green-400 tracking-wider text-center">
                                         {number}
@@ -227,7 +197,7 @@ export default function MeterScanner() {
                 )}
                 {!number && !scanning && (
                     <div className="text-center text-gray-400">
-                        <p className="text-sm">Point camera at meter display and tap SCAN</p>
+                        <p className="text-sm">Align numbers in guide box and tap SCAN</p>
                     </div>
                 )}
             </div>
