@@ -24,37 +24,22 @@ export default defineConfig({
       }
     })
   ],
-
-  // server: {
-  //   host: "0.0.0.0",
-  //   port: 5173,
-  //   strictPort: true,
-
-  //   hmr: {
-  //     protocol: "wss",
-  //     host: "unmollifiable-karima-unpackaged.ngrok-free.dev",
-  //     port: 443,
-  //     path: "/__vite_hmr",     // ← THIS LINE FIXES THE ISSUE
-  //   },
-
-  //   allowedHosts: [
-  //     ".ngrok-free.app",
-  //     ".ngrok.io",
-  //     ".ngrok.app",
-  //     "unmollifiable-karima-unpackaged.ngrok-free.dev",
-  //     "localhost",
-  //     "127.0.0.1",
-  //   ]
-  // }
-
   server: {
-    host: "0.0.0.0",
+    host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    // Disable HMR entirely for ngrok tunnels
-    hmr: false,
-    allowedHosts: ["localhost", "127.0.0.1", ".ngrok-free.app", "unmollifiable-karima-unpackaged.ngrok-free.dev",]
+    // THIS IS THE MAGIC THAT FIXES EVERYTHING
+    hmr: {
+      clientPort: 443,   // ngrok HTTPS port → forces wss://your-ngrok-subdomain.ngrok-free.dev
+    },
+    // Allow ALL ngrok free domains + your exact subdomain
+    allowedHosts: [
+      '.ngrok-free.app',
+      '.ngrok.io',
+      '.ngrok.app',
+      'unmollifiable-karima-unpackaged.ngrok-free.dev', // ← your current one
+      'localhost',
+      '127.0.0.1'
+    ]
   }
-
-
 })
