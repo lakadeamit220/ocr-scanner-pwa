@@ -1,4 +1,5 @@
 import GoogleMLKitLive from "./components/GoogleMLKitLive"
+import MeterScanner from "./components/MeterScanner"
 import OCRScanner from "./components/OCRScanner"
 import Scanner from "./components/Scanner"
 import TesseractLive from "./components/TesseractLive"
@@ -12,7 +13,8 @@ function App() {
       {/* <TesseractSnapshot /> */}
       {/* <TesseractLive /> */}
       {/* <GoogleMLKitLive /> */}
-      <Scanner />
+      {/* <Scanner /> */}
+      <MeterScanner/>
     </>
   )
 }
