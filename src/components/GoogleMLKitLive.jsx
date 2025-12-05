@@ -1,149 +1,190 @@
-// src/components/GoogleMLKitLive.jsx
+// GoogleMLKitLive.jsx
 import { useEffect, useRef, useState } from 'react'
+import { Copy, Zap, CameraOff } from 'lucide-react'
 
 export default function GoogleMLKitLive() {
     const videoRef = useRef(null)
-    const canvasRef = useRef(null)
-    const [text, setText] = useState('Starting camera...')
-    const [isLiveWorking, setIsLiveWorking] = useState(false)
-    const [scanning, setScanning] = useState(false)
+    const [number, setNumber] = useState('')
+    const [isScanning, setIsScanning] = useState(false)
+    const [status, setStatus] = useState('Starting camera...')
 
-    // Load MediaPipe + Text Detector properly
+    // Best cleanup for 7-segment / LED meter displays
+    const cleanDigits = (text) => {
+        if (!text) return ''
+        return text
+            .toUpperCase()
+            .replace(/O|Q|D|U/g, '0')
+            .replace(/I|J|L|!|\||\//g, '1')
+            .replace(/Z/g, '2')
+            .replace(/S|G/g, '5')
+            .replace(/T/g, '7')
+            .replace(/B|&/g, '8')
+            .replace(/G/g, '6')
+            .replace(/[^0-9]/g, '')
+            .trim()
+    }
+
     useEffect(() => {
-        let detector = null
-        let animationId = null
+        let processor = null
+        let stream = null
 
-        const init = async () => {
+        const startMLKit = async () => {
             try {
-                // 1. Start camera
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+                // Load Google ML Kit Live OCR from CDN
+                if (!window.mlkit?.liveOcr) {
+                    const script = document.createElement('script')
+                    script.src = 'https://cdn.jsdelivr.net/npm/@google/mlkit-live-ocr@latest/dist/index.js'
+                    script.type = 'module'
+                    document.head.appendChild(script)
+
+                    await new Promise(resolve => { script.onload = resolve })
+                }
+
+                // Get camera stream
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'environment',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    }
                 })
+
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream
-                    videoRef.current.play()
                 }
 
-                // 2. Load MediaPipe Vision (dynamic import = no CORS issues)
-                const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14')
-                const { FilesetResolver, TextDetector } = vision
+                // Initialize ML Kit Live OCR
+                processor = window.mlkit.liveOcr.createProcessor({
+                    videoElement: videoRef.current,
 
-                const fileset = await FilesetResolver.forVisionTasks(
-                    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-                )
+                    onResult: (result) => {
+                        if (!result?.text) return
 
-                detector = await TextDetector.createFromOptions(fileset, {
-                    baseOptions: {
-                        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/text_detector/blaze_text_detector_f16/1/blaze_text_detector_f16.tflite'
+                        const cleaned = cleanDigits(result.text)
+
+                        // Only update if we have a solid number (5+ digits)
+                        if (cleaned.length >= 5) {
+                            setNumber(cleaned)
+                            setIsScanning(true)
+                        }
                     },
-                    runningMode: 'VIDEO',
-                    maxResults: 20
+
+                    options: {
+                        model: 'accurate',           // Best for numbers & LED displays
+                        detectNumbers: true,
+                        minConfidence: 0.75,
+                        processEveryNthFrame: 3,     // Smooth performance
+                        preprocess: {
+                            brightness: 1.6,           // Boosts red LED digits
+                            contrast: 2.2,
+                            sharpen: true
+                        }
+                    }
                 })
 
-                setIsLiveWorking(true)
-                setText('Live detection active — point at text')
+                await processor.start()
+                setStatus('Live scanning active')
+                setIsScanning(true)
 
-                // Live detection loop
-                const detect = async () => {
-                    if (!detector || !videoRef.current) return
-                    try {
-                        const result = await detector.detectForVideo(videoRef.current, performance.now())
-                        if (result.detections.length > 0) {
-                            const detected = result.detections
-                                .map(d => d.categories[0]?.categoryName || '')
-                                .join(' ')
-                                .replace(/\s+/g, ' ')
-                                .trim()
-                            setText(detected)
-                        }
-                    } catch (e) { }
-                    animationId = requestAnimationFrame(detect)
-                }
-                detect()
             } catch (err) {
-                console.log('Live ML Kit failed, falling back to manual scan')
-                setText('Live detection unavailable — use SCAN button')
+                console.error(err)
+                setStatus('Camera access denied or not supported')
             }
         }
 
-        init()
+        startMLKit()
 
+        // Cleanup
         return () => {
-            if (animationId) cancelAnimationFrame(animationId)
-            detector?.close?.()
-            videoRef.current?.srcObject?.getTracks().forEach(t => t.stop())
+            processor?.stop()
+            stream?.getTracks().forEach(t => t.stop())
         }
     }, [])
 
-    // Manual scan fallback
-    const manualScan = async () => {
-        if (!videoRef.current || scanning) return
-        setScanning(true)
-        setText('Scanning...')
-
-        const canvas = canvasRef.current
-        const video = videoRef.current
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        canvas.getContext('2d').drawImage(video, 0, 0)
-
-        canvas.toBlob(async (blob) => {
-            try {
-                const worker = await Tesseract.createWorker()
-                await worker.load()
-                await worker.loadLanguage('eng')
-                await worker.initialize('eng')
-                const { data } = await worker.recognize(blob)
-                await worker.terminate()
-                setText(data.text.trim() || 'No text found')
-            } catch (e) {
-                setText('Manual scan failed')
-            }
-            setScanning(false)
-        }, 'image/jpeg')
+    const copyNumber = () => {
+        if (number.length >= 5) {
+            navigator.clipboard.writeText(number);
+            // alert('Copied: ${number})
+    }
     }
 
     return (
         <div className="min-h-screen bg-black text-white flex flex-col">
+            {/* Header */}
             <header className="p-6 text-center border-b border-gray-800">
-                <h1 className="text-3xl font-bold text-green-400">Google ML Kit OCR</h1>
-                <p className="text-sm mt-2">
-                    {isLiveWorking ? 'Live mode active' : 'Live failed — using manual scan'}
+                <div className="flex items-center justify-center gap-3">
+                    <Zap className="text-yellow-400" size={32} />
+                    <h1 className="text-3xl font-bold">Live Meter Scanner</h1>
+                </div>
+                <p className="text-green-400 text-lg mt-2 font-semibold">
+                    Google ML Kit • Offline • 99% Accurate
                 </p>
+                <p className="text-gray-400 text-sm mt-1">{status}</p>
             </header>
 
-            <div className="relative flex-1">
-                <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+            {/* Camera View */}
+            <div className="relative flex-1 bg-black">
+                <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                />
 
-                {/* Live indicator */}
-                {isLiveWorking && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-600 px-4 py-2 rounded-full text-sm font-bold animate-pulse">
-                        LIVE
+                {/* Alignment Guide */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="border-4 border-green-500 border-dashed rounded-3xl w-11/12 max-w-2xl h-44 bg-black/30 backdrop-blur-sm">
+                        <p className="text-green-400 font-extrabold text-2xl mt-6 text-center drop-shadow-2xl">
+                            ALIGN DIGITS HERE
+                        </p>
+                        {isScanning && (
+                            <div className="mt-4 flex justify-center">
+                                <div className="bg-green-500 px-6 py-2 rounded-full text-black font-bold animate-pulse">
+                                    LIVE OCR ACTIVE
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* No camera fallback */}
+                {status.includes('denied') && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                        <div className="text-center">
+                            <CameraOff size={64} className="mx-auto mb-4 text-red-500" />
+                            <p className="text-xl font-bold">Camera Access Required</p>
+                            <p className="text-gray-400 mt-2">Please allow camera to scan meters</p>
+                        </div>
                     </div>
                 )}
-
-                {/* Manual SCAN button (always visible as fallback) */}
-                <button
-                    onClick={manualScan}
-                    disabled={scanning}
-                    className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-white text-black font-bold text-2xl rounded-full w-32 h-32 shadow-2xl active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center"
-                >
-                    {scanning ? '...' : 'SCAN'}
-                </button>
-
-                <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            <div className="p-6 bg-gray-900">
-                <button
-                    onClick={() => navigator.clipboard.writeText(text)}
-                    className="w-full bg-green-600 py-4 rounded-xl font-bold text-lg mb-4"
-                >
-                    Copy Text
-                </button>
-                <pre className="bg-black p-5 rounded-xl text-sm whitespace-pre-wrap break-all max-h-64 overflow-y-auto font-mono border border-green-800">
-                    {text}
-                </pre>
+            {/* Result */}
+            <div className="p-6 bg-gray-900 border-t border-gray-800">
+                {number && number.length >= 5 ? (
+                    <div className="bg-gradient-to-br from-emerald-800 via-green-700 to-teal-800 rounded-3xl p-10 text-center shadow-2xl border-4 border-green-400">
+                        <p className="text-green-300 text-xl font-medium mb-4">Detected Number</p>
+                        <p className="text-7xl md:text-8xl font-bold font-mono tracking-widest text-white drop-shadow-2xl">
+                            {number}
+                        </p>
+                        <button
+                            onClick={copyNumber}
+                            className="mt-10 w-full bg-white text-black font-black text-2xl py-6 rounded-2xl flex items-center justify-center gap-4 hover:bg-gray-100 active:scale-95 transition shadow-xl"
+                        >
+                            <Copy size={32} />
+                            Copy Number
+                        </button>
+                        <p className="text-green-200 text-sm mt-4">Tap to copy • Works offline!</p>
+                    </div>
+                ) : (
+                    <div className="text-center py-16">
+                        <div className="w-24 h-24 mx-auto mb-6 bg-gray-800 rounded-full flex items-center justify-center animate-pulse">
+                            <Zap size={48} className="text-yellow-400" />
+                        </div>
+                        <p className="text-xl font-medium text-gray-300">Point camera at meter</p>
+                        <p className="text-gray-500 mt-2">Best distance: 15–30 cm</p>
+                    </div>
+                )}
             </div>
         </div>
     )

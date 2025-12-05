@@ -16,10 +16,10 @@ function App() {
       {/* <OCRScanner /> */}
       {/* <TesseractSnapshot /> */}
       {/* <TesseractLive /> */}
-      {/* <GoogleMLKitLive /> */}
+      <GoogleMLKitLive />
       {/* <Scanner /> */}
 
-      <MeterScanner/>
+      {/* <MeterScanner/> */}
     </>
   )
 }
