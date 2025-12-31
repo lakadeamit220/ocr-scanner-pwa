@@ -262,9 +262,11 @@ export default function MeterScanner() {
                         {(!number.includes('No ') && !number.includes('Error') && !number.includes('❌')) ? (
                             <>
                                 <p className="text-green-300 text-sm font-medium mb-3 text-center">Detected Number</p>
-                                <p className="text-6xl font-bold font-mono text-center text-white tracking-wider">
-                                    {number}
-                                </p>
+                                <div className="relative overflow-x-auto py-4"> {/* Adds horizontal scroll if needed */}
+                                    <p className="text-3xl font-bold font-mono text-center text-white tracking-wider min-w-fit inline-block px-4">
+                                        {number}
+                                    </p>
+                                </div>
                                 <button
                                     onClick={copyNumber}
                                     className="mt-6 w-full bg-white text-black font-bold py-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-200"
