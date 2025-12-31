@@ -5,6 +5,7 @@ import Scanner from "./components/Scanner"
 import TesseractLive from "./components/TesseractLive"
 import TesseractSnapshot from "./components/TesseractSnapshot"
 import KoloAPI from "./components/KoloAPI"
+import StaticMeter from "./components/StaticMeter"
 
 function App() {
 
@@ -19,7 +20,9 @@ function App() {
       {/* <GoogleMLKitLive /> */}
       {/* <Scanner /> */}
 
-      <MeterScanner/>
+      {/* <MeterScanner/> */}
+
+      <StaticMeter detectedNumber="245.45" />
     </>
   )
 }
