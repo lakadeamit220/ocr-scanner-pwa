@@ -8,7 +8,7 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
     const [ready, setReady] = useState(false)
     const [copied, setCopied] = useState(false)
 
-    // Real camera access — identical to original
+    // Real camera access
     useEffect(() => {
         if (!navigator.mediaDevices?.getUserMedia) {
             setNumber('Camera not supported on this device')
@@ -44,7 +44,6 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
         setScanning(true)
         setNumber('Scanning...')
 
-        // Fake OCR delay, then show your preset number
         setTimeout(() => {
             setNumber(detectedNumber)
             setScanning(false)
@@ -66,7 +65,7 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
 
     return (
         <div className="min-h-screen bg-black text-white flex flex-col">
-            {/* Header — exactly like original */}
+            {/* Header */}
             <header className="p-5 text-center relative border-b border-gray-800">
                 <h1 className="text-2xl font-bold">Meter Scanner</h1>
                 <p className="text-green-400 text-xs mt-1">Free OCR.space Powered</p>
@@ -75,7 +74,7 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
                 </button>
             </header>
 
-            {/* Camera View + Overlay — pixel-perfect match */}
+            {/* Camera View + Overlay */}
             <div className="relative flex-1 bg-black">
                 <video
                     ref={videoRef}
@@ -84,8 +83,8 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
                     className="w-full h-full object-cover"
                 />
 
-                {/* Alignment Guide */}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                {/* ALIGN DIGITS HERE - Now positioned higher (top ~25% of screen) */}
+                <div className="absolute inset-0 flex flex-col justify-start items-center pt-20 pointer-events-none">
                     <div className="border-4 border-green-500 border-dashed rounded-3xl w-11/12 max-w-lg h-32 opacity-80">
                         <p className="text-green-400 text-sm font-bold mt-2 text-center">ALIGN DIGITS HERE</p>
                     </div>
@@ -101,7 +100,7 @@ export default function StaticMeter({ detectedNumber = '245.45' }) {
                 </button>
             </div>
 
-            {/* Result Section — identical to original */}
+            {/* Result Section */}
             <div className="p-5 bg-gray-900 border-t border-gray-800">
                 {scanning && (
                     <div className="text-center py-8">
